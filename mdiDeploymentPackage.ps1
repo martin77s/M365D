@@ -13,14 +13,13 @@
 Script Name	: mdiDeploymentPackage.ps1
 Description	: Download the MDI sensor installation accessKey and package (only if newer version is available)
 Author	: Martin Schvartzman, Microsoft
-Last Update	: 2022-07-04
+Last Update	: 2022-07-06
 Keywords	: MDI, API, Deployment
 
 #>
 
 param(
-    [string] $Path = '.',
-    [switch] $Install
+    [string] $Path = '.'
 )
 
 #region Helper functions
@@ -112,15 +111,4 @@ $accessKey = Get-mdiSensorDeploymentAccessKey -accessToken $accessToken -workspa
 
 Write-Verbose -Verbose -Message 'Downloading latest sensor installation package'
 $mdiSensorPackage = Get-mdiSensorPackage -accessToken $accessToken -workspaceName $workspaceName
-
-
-if ($Install) {
-    Write-Verbose -Verbose -Message 'Extracting installation package'
-    $targetPath =  ($mdiSensorPackage.FullName -replace '\.zip$')
-    Expand-Archive -Path $mdiSensorPackage -DestinationPath
-
-    Write-Verbose -Verbose -Message 'Running installation package'
-    $exePath = Join-Path -Path $targetPath -ChildPath 'Azure ATP Sensor Setup.exe'
-    $exeParams = '/quiet NetFrameworkCommandLineArguments="/q" AccessKey={0}' -f $accessKey
-    Start-Process -FilePath $exePath -ArgumentList $exeParams -Wait
-}
+$mdiSensorPackage
