@@ -13,8 +13,8 @@
 Script Name	: mdiTroubleshootingPackage.ps1
 Description	: Collect domain and domain controllers configuration related to MDI, for support and troubleshooting purposes.
 Author		: Martin Schvartzman, Microsoft
-Last Update	: 2022/07/10
-Version		: 0.1
+Last Update	: 2022/07/30
+Version		: 0.2
 
 #>
 
@@ -91,21 +91,24 @@ function Get-mdiCaptureComponent {
     param (
         [Parameter(Mandatory = $true)] [string] $ComputerName
     )
+    $uninstallRegKey = 'SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall'
     foreach ($registryView in @('Registry32', 'Registry64')) {
         $hklm = [Microsoft.Win32.RegistryKey]::OpenRemoteBaseKey('LocalMachine', $ComputerName, $registryView)
-        $uninstallRef = $hklm.OpenSubKey('SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall')
+        $uninstallRef = $hklm.OpenSubKey($uninstallRegKey)
         $applications = $uninstallRef.GetSubKeyNames()
 
         foreach ($app in $applications) {
-            $appDetails = $hklm.OpenSubKey( $uninstallRegKey + '\\' + $app)
+            $appDetails = $hklm.OpenSubKey($uninstallRegKey + '\' + $app)
             $appDisplayName = $appDetails.GetValue('DisplayName')
             $appVersion = $appDetails.GetValue('DisplayVersion')
-
             if ($appDisplayName -match 'npcap|winpcap') {
                 $return = '{0} ({1})' -f $appDisplayName, $appVersion
             }
         }
         $hklm.Close()
+    }
+    if (-not $return) {
+        Get-Item -Path
     }
     $return
 }
