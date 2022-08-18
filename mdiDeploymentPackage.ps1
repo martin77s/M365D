@@ -12,27 +12,35 @@
 
 Script Name	: mdiDeploymentPackage.ps1
 Description	: Download the MDI sensor installation accessKey and package (only if newer version is available)
-Author	: Martin Schvartzman, Microsoft
-Last Update	: 2022-07-06
+Author		: Martin Schvartzman, Microsoft
+Last Update	: 2022/08/18
+Version		: 0.3
 Keywords	: MDI, API, Deployment
 
 #>
 
 param(
+    [Parameter(Mandatory = $true)]
+    [System.Management.Automation.PSCredential] $Credential,
+
+    [Parameter(Mandatory = $false)]
+    $WorkspaceName = $null,
+
+    [Parameter(Mandatory = $false)]
     [string] $Path = '.'
 )
 
 #region Helper functions
 function Get-mdiToken {
     param (
-        [Parameter(Mandatory = $true)] $user,
-        [Parameter(Mandatory = $true)] $pass
+        [Parameter(Mandatory = $true)]
+        [System.Management.Automation.PSCredential] $Credential
     )
 
     $params = @{
         'Body'        = @{
-            'username'     = $user
-            'password'     = $pass
+            'username'     = ($Credential).UserName
+            'password'     = ($Credential).GetNetworkCredential().Password
             'grant_type'   = 'password'
             'redirect_uri' = 'urn:ietf:wg:oauth:2.0:oob' # PowerShell redirect Uri
             'client_id'    = '1950a258-227b-4e31-a9cf-717495945fc2' # PowerShell client Id
@@ -67,10 +75,15 @@ function Get-mdiSensorPackage {
     param(
         [Parameter(Mandatory = $true)] [string] $accessToken,
         [Parameter(Mandatory = $true)] [string] $workspaceName,
+        [Parameter(Mandatory = $true)] [string] $path,
         [switch] $Force
     )
 
-    $latestLocalVersion = dir -Path $Path -Directory | Where-Object { $_.Name -as [version] } |
+    if(-not (Test-Path $path)) {
+        New-Item -ItemType Directory -Path $path | Out-Null
+    }
+
+    $latestLocalVersion = Get-ChildItem -Path $path -Directory | Where-Object { $_.Name -as [version] } |
         Sort-Object -Property { [version] $_.Name } -Descending | Select-Object -First 1 -ExpandProperty Name
 
     $uri = 'https://{0}.atp.azure.com/api/sensors/deploymentPackageUri' -f $workspaceName
@@ -81,28 +94,26 @@ function Get-mdiSensorPackage {
     $cloudVersion = [version]($downloadUri -split '/')[5]
 
     if ($Force -or $cloudVersion -gt $latestLocalVersion) {
-        $targetPath = (New-Item -Path $Path -Name $cloudVersion.ToString() -ItemType Directory -Force)
+        $targetPath = (New-Item -Path $path -Name $cloudVersion.ToString() -ItemType Directory -Force)
         Invoke-WebRequest -Uri $downloadUri -Method Get -OutFile ('{0}\Azure ATP Sensor Setup.zip' -f $targetPath.FullName)
         $returnPath = $targetPath.FullName
     } else {
-        $returnPath = Join-Path -Path (Get-Item -Path $Path).FullName -ChildPath $latestLocalVersion
+        $returnPath = Join-Path -Path (Get-Item -Path $path).FullName -ChildPath $latestLocalVersion
     }
-    dir -Path $returnPath -Filter *.zip
+    Get-ChildItem -Path $returnPath -Filter *.zip
 }
 #endregion
 
 
-# Replace hardcoded values with getting them securely from an Azure KeyVault (or similar)
-$username = 'myuser@mytenant.onmicrosoft.com'
-$password = 'my$3cur3dP4ssw0rd!'
 
-
-# Extract the workspace name from the upn suffix. Can be set manually if needed.
-$workspaceName = $username -replace '.*@(\w+)\..*', '$1'
+# If not supplied, extract the workspace name from the upn suffix
+if (-not $WorkspaceName) {
+    $workspaceName = ($Credential).UserName -replace '.*@(\w+)\..*', '$1'
+}
 
 
 Write-Verbose -Verbose -Message 'Authenticating with Azure and the MDI application'
-$accessToken = Get-mdiToken $username $password
+$accessToken = Get-mdiToken -Credential $Credential
 
 
 Write-Verbose -Verbose -Message 'Getting the access key for the workspace'
@@ -110,5 +121,5 @@ $accessKey = Get-mdiSensorDeploymentAccessKey -accessToken $accessToken -workspa
 
 
 Write-Verbose -Verbose -Message 'Downloading latest sensor installation package'
-$mdiSensorPackage = Get-mdiSensorPackage -accessToken $accessToken -workspaceName $workspaceName
+$mdiSensorPackage = Get-mdiSensorPackage -accessToken $accessToken -workspaceName $workspaceName -path $Path
 $mdiSensorPackage

@@ -13,7 +13,8 @@
 Script Name	: m365dAdvancedHuntingAPI.ps1
 Description	: Example for using the Advanced Hunting API
 Author		: Martin Schvartzman, Microsoft
-Last Update	: 2022-07-25
+Last Update	: 2022/07/25
+Version		: 0.1
 Keywords	: MDI, API, AdvancedHunting
 
 References  :

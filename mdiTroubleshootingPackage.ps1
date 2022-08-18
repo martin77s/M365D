@@ -13,11 +13,11 @@
 Script Name	: mdiTroubleshootingPackage.ps1
 Description	: Collect domain and domain controllers configuration related to MDI, for support and troubleshooting purposes.
 Author		: Martin Schvartzman, Microsoft
-Last Update	: 2022/07/30
-Version		: 0.2
+Last Update	: 2022/08/18
+Version		: 0.3
+Keywords	: MDI, Deployment, Troubleshooting, Configuration, Support
 
 #>
-
 
 #requires -Module ActiveDirectory
 
@@ -106,9 +106,6 @@ function Get-mdiCaptureComponent {
             }
         }
         $hklm.Close()
-    }
-    if (-not $return) {
-        Get-Item -Path
     }
     $return
 }
