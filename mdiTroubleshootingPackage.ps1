@@ -13,8 +13,8 @@
 Script Name	: mdiTroubleshootingPackage.ps1
 Description	: Collect domain and domain controllers configuration related to MDI, for support and troubleshooting purposes.
 Author		: Martin Schvartzman, Microsoft
-Last Update	: 2022/08/18
-Version		: 0.3
+Last Update	: 2022/08/22
+Version		: 0.4
 Keywords	: MDI, Deployment, Troubleshooting, Configuration, Support
 
 #>
@@ -111,19 +111,20 @@ function Get-mdiCaptureComponent {
 }
 
 
-function Get-mdiAdvancedAuditing {
+function Invoke-mdiRemoteCommand {
     param (
-        [Parameter(Mandatory = $true)] [string] $ComputerName
+        [Parameter(Mandatory = $true)] [string] $ComputerName,
+        [Parameter(Mandatory = $true)] [string] $CommandLine
     )
 
-    $localFile = 'C:\Windows\Temp\auditpol-{0:yyyyMMddHHmm}.tmp' -f (Get-Date)
+    $localFile = 'C:\Windows\Temp\{0}.tmp' -f [guid]::NewGuid().GUID
     $wmiParams = @{
         ComputerName = $ComputerName
         Namespace    = 'root\cimv2'
         Class        = 'Win32_Process'
-        ErrorAction  = 'SilentlyContinue'
-        ArgumentList = 'cmd.exe /c auditpol.exe /get /category:* /r 2>&1>{0}' -f $localFile
         Name         = 'Create'
+        ArgumentList = '{0} 2>&1>{1}' -f $CommandLine, $localFile
+        ErrorAction  = 'SilentlyContinue'
     }
     $processId = Invoke-WmiMethod @wmiParams
     # TODO: Wait for the specific process to complete
@@ -132,8 +133,8 @@ function Get-mdiAdvancedAuditing {
     try {
         # Read the file using SMB
         $remoteFile = $localFile -replace 'C:', ('\\{0}\C$' -f $ComputerName)
-        $AdvancedAuditing = Get-Content -Path $remoteFile | ConvertFrom-Csv
-
+        $return = Get-Content -Path $remoteFile
+        Remove-Item -Path $remoteFile -Force
     } catch {
         # Read the remote file using WMI
         $psmClassParams = @{
@@ -157,10 +158,43 @@ function Get-mdiAdvancedAuditing {
         $fileBytes = $fileContents.FileData[4..($fileLength - 1)]
         $localTempFile = [System.IO.Path]::GetTempFileName()
         Set-Content -Value $fileBytes -Encoding Byte -Path $localTempFile
-        $AdvancedAuditing = Get-Content -Path $localTempFile | ConvertFrom-Csv
+        $return = Get-Content -Path $localTempFile
         Remove-Item -Path $localTempFile -Force
     }
-    $AdvancedAuditing | Where-Object {
+    $return
+}
+
+
+function Get-mdiPowerScheme {
+    param (
+        [Parameter(Mandatory = $true)] [string] $ComputerName
+    )
+
+    $commandLine = 'cmd.exe /c %windir%\system32\powercfg.exe /getactivescheme'
+    $powerScheme = Invoke-mdiRemoteCommand -ComputerName $ComputerName -CommandLine $commandLine
+    if ($powerScheme -match 'Power Scheme GUID:\s+(?<guid>[a-fA-F0-9]{8}[-]?([a-fA-F0-9]{4}[-]?){3}[a-fA-F0-9]{12})\s+\((?<name>.*)\)') {
+        $return = [ordered]@{
+            guid              = $Matches.guid
+            name              = $Matches.name
+            isHighPerformance = $Matches.guid -eq '8c5e7fda-e8bf-4a96-9a85-a6e23a8c635c'
+        }
+    } else {
+        $return = [ordered]@{
+            details = $powerScheme
+        }
+    }
+    $return
+}
+
+
+function Get-mdiAdvancedAuditing {
+    param (
+        [Parameter(Mandatory = $true)] [string] $ComputerName
+    )
+
+    $commandLine = 'cmd.exe /c auditpol.exe /get /category:* /r'
+    $advancedAuditing = Invoke-mdiRemoteCommand -ComputerName $ComputerName -CommandLine $commandLine
+    $advancedAuditing |  ConvertFrom-Csv | Where-Object {
         $_.Subcategory -in ('Security System Extension', 'Distribution Group Management', 'Security Group Management',
             'Computer Account Management', 'User Account Management', 'Directory Service Access', 'Credential Validation')
     }
@@ -209,9 +243,13 @@ function Get-mdiDomainControllerCoverage {
             Write-Verbose -Message "Getting capturing component for $($dc.FQDN)"
             $dc.Add('CapturingComponent', (Get-mdiCaptureComponent -ComputerName $dc.FQDN))
 
+            Write-Verbose -Message "Getting power settings for $($dc.FQDN)"
+            $powerSettings = Get-mdiPowerScheme -ComputerName $dc.FQDN
+            $dc.Add('powerSettings', $powerSettings)
+
             Write-Verbose -Message "Getting advanced auditing for $($dc.FQDN)"
-            $AdvancedAuditing = Get-mdiAdvancedAuditing -ComputerName $dc.FQDN
-            $dc.Add('AdvancedAuditing', $AdvancedAuditing)
+            $advancedAuditing = Get-mdiAdvancedAuditing -ComputerName $dc.FQDN
+            $dc.Add('AdvancedAuditing', $advancedAuditing)
 
             [PSCustomObject]$dc
         }
@@ -267,3 +305,4 @@ $report = @{
 }
 $reportFile = Join-Path -Path $Path -ChildPath ('mdi-{0}.json' -f $Domain)
 $report | ConvertTo-Json -Depth 100 | Out-File -FilePath $reportFile -Force
+Write-Host ('Output file: {0}' -f (Resolve-Path -Path $reportFile))
