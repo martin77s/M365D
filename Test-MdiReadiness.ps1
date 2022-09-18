@@ -10,8 +10,8 @@
   lawsuits, including attorneys' fees, that arise or result from the use or distribution of the Sample Code.
  =================================================================================================================================
 
-Script Name	: Test-MdiPrerequisite.ps1
-Description	: Verify  Microsoft Defender for Identity prerequisites are in place
+Script Name	: Test-MdiReadiness.ps1
+Description	: Verify Microsoft Defender for Identity prerequisites are in place
 Author		: Martin Schvartzman, Microsoft
 Last Update	: 2022/09/18
 Version		: 0.2
@@ -20,14 +20,14 @@ Note		: Running the script on an environment with MDI already deployed will trig
 
 #>
 
+#Requires -Version 5.0
 #requires -Module ActiveDirectory
-
 
 [CmdletBinding(SupportsShouldProcess = $true)]
 param (
     [Parameter(Mandatory = $false, HelpMessage = 'Path to a folder where the reports are be saved')]
     [string] $Path = '.',
-    [Parameter(Mandatory = $false, HelpMessage = 'Domain name to work against. Defaults to current domain')]
+    [Parameter(Mandatory = $false, HelpMessage = 'Domain Name or FQDN to work against. Defaults to current domain')]
     [string] $Domain = $null,
     [Parameter(Mandatory = $false, HelpMessage = 'Open the HTML report at the end of the collection process')]
     [switch] $OpenHtmlReport
@@ -43,7 +43,7 @@ function Invoke-mdiRemoteCommand {
         [Parameter(Mandatory = $true)] [string] $CommandLine
     )
 
-    $localFile = 'C:\Windows\Temp\{0}.tmp' -f [guid]::NewGuid().GUID
+    $localFile = 'C:\Windows\Temp\mdi-{0}.tmp' -f [guid]::NewGuid().GUID
     $wmiParams = @{
         ComputerName = $ComputerName
         Namespace    = 'root\cimv2'
@@ -410,7 +410,7 @@ function Get-mdiDomainControllerReadiness {
 }
 
 
-function Set-mdiPrerequisiteReport {
+function Set-MdiReadinessReport {
     param (
         [Parameter(Mandatory = $true)] [string] $Domain,
         [Parameter(Mandatory = $true)] [string] $Path,
@@ -418,6 +418,7 @@ function Set-mdiPrerequisiteReport {
     )
 
     $jsonReportFile = Join-Path -Path $Path -ChildPath "mdi-$Domain.json"
+    Write-Verbose "Creating detailed json report: $htmlReportFile" -Verbose
     $ReportData | ConvertTo-Json -Depth 5 | Out-File -FilePath $jsonReportFile -Force
     $jsonReportFilePath = (Resolve-Path -Path $jsonReportFile).Path
 
@@ -457,19 +458,19 @@ th { padding: 8px; text-align: left; background-color: #e4e2e0; color: #212121; 
 <!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN"  "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
 <html xmlns="http://www.w3.org/1999/xhtml">
 <head>{0}</head><body>
-<h2>MDI prerequisites report for <b>{1}</b></h2>
-<h4>Domain Services prerequisites</h4>
+<h2>MDI readiness report for <b>{1}</b></h2>
+<h4>Domain Services readiness</h4>
 {2}
-<h4>Domain Controllers prerequisites</h4>
+<h4>Domain Controllers readiness</h4>
 {3}
 <br/>Full details file can be found at <a href='{4}'>{4}</a><br/>
-<br/>Created at {5} by <a href='https://aka.ms/mdi/Test-MdiPrerequisite'>Test-MdiPrerequisite.ps1</a>
+<br/>Created at {5} by <a href='https://aka.ms/mdi/Test-MdiReadiness'>Test-MdiReadiness.ps1</a>
 '@ -f $css, $domain, $htmlDS, $htmlDCs, $jsonReportFilePath, [datetime]::Now
 
     $htmlReportFile = Join-Path -Path $Path -ChildPath "mdi-$Domain.html"
+    Write-Verbose "Creating html report: $htmlReportFile" -Verbose
     $htmlContent | Out-File -FilePath $htmlReportFile -Force
     (Resolve-Path -Path $htmlReportFile).Path
-
 }
 
 #endregion
@@ -487,7 +488,7 @@ if ($PSCmdlet.ShouldProcess($Domain, 'Create MDI related configuration reports')
         DomainExchangeAuditing = Get-mdiExchangeAuditing -Domain $Domain
     }
 
-    $htmlReportFile = Set-mdiPrerequisiteReport -Domain $Domain -Path $Path -ReportData $report
+    $htmlReportFile = Set-MdiReadinessReport -Domain $Domain -Path $Path -ReportData $report
     if ($OpenHtmlReport) { Invoke-Item -Path $htmlReportFile }
 }
 
