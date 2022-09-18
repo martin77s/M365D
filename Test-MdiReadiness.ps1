@@ -192,6 +192,115 @@ function Get-mdiCertReadiness {
 }
 
 
+function Get-mdiCaptureComponent {
+    param (
+        [Parameter(Mandatory = $true)] [string] $ComputerName
+    )
+    $uninstallRegKey = 'SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall'
+    try {
+        foreach ($registryView in @('Registry32', 'Registry64')) {
+            $hklm = [Microsoft.Win32.RegistryKey]::OpenRemoteBaseKey('LocalMachine', $ComputerName, $registryView)
+            $uninstallRef = $hklm.OpenSubKey($uninstallRegKey)
+            $applications = $uninstallRef.GetSubKeyNames()
+
+            foreach ($app in $applications) {
+                $appDetails = $hklm.OpenSubKey($uninstallRegKey + '\' + $app)
+                $appDisplayName = $appDetails.GetValue('DisplayName')
+                $appVersion = $appDetails.GetValue('DisplayVersion')
+                if ($appDisplayName -match 'npcap|winpcap') {
+                    $return = '{0} ({1})' -f $appDisplayName, $appVersion
+                }
+            }
+            $hklm.Close()
+        }
+    } catch {
+        $return = 'N/A'
+    }
+    $return
+}
+
+
+function Get-mdiSensorVersion {
+    param (
+        [Parameter(Mandatory = $true)] [string] $ComputerName
+    )
+    try {
+        $serviceParams = @{
+            ComputerName = $ComputerName
+            Namespace    = 'root\cimv2'
+            Class        = 'Win32_Service'
+            Property     = 'Name', 'PathName', 'State'
+            Filter       = "Name = 'AATPSensor'"
+            ErrorAction  = 'SilentlyContinue'
+        }
+        $service = Get-WmiObject @serviceParams
+        if ($service) {
+            $versionParams = @{
+                ComputerName = $ComputerName
+                Namespace    = 'root\cimv2'
+                Class        = 'CIM_DataFile'
+                Property     = 'Version'
+                Filter       = 'Name={0}' -f ($service.PathName -replace '\\', '\\')
+                ErrorAction  = 'SilentlyContinue'
+            }
+            $return = (Get-WmiObject @versionParams).Version
+        } else {
+            $return = 'N/A'
+        }
+    } catch {
+        $return = 'N/A'
+    }
+    $return
+}
+
+
+function Get-mdiMachineType {
+    param (
+        [Parameter(Mandatory = $true)] [string] $ComputerName
+    )
+    $csiParams = @{
+        ComputerName = $ComputerName
+        Namespace    = 'root\cimv2'
+        Class        = 'Win32_ComputerSystem'
+        Property     = 'Model', 'Manufacturer'
+        ErrorAction  = 'SilentlyContinue'
+    }
+    $csi = Get-WmiObject @csiParams
+    switch ($csi.Model) {
+        { $_ -eq 'Virtual Machine' } { 'Hyper-V'; break }
+        { $_ -match 'VMware|VirtualBox' } { $_; break }
+        default {
+            switch ($csi.Manufacturer) {
+                { $_ -match 'Xen|Google' } { $_; break }
+                { $_ -match 'QEMU' } { 'KVM'; break }
+                { $_ -eq 'Microsoft Corporation' } {
+                    $azgaParams = @{
+                        ComputerName = $ComputerName
+                        Namespace    = 'root\cimv2'
+                        Class        = 'Win32_Service'
+                        Filter       = "Name = 'WindowsAzureGuestAgent'"
+                        ErrorAction  = 'SilentlyContinue'
+                    }
+                    if (Get-WmiObject @azgaParams) { 'Azure' } else { 'Hyper-V' }
+                    break
+                }
+                default {
+                    $cspParams = @{
+                        ComputerName = $ComputerName
+                        Namespace    = 'root\cimv2'
+                        Class        = 'Win32_ComputerSystemProduct'
+                        Property     = 'uuid'
+                        ErrorAction  = 'SilentlyContinue'
+                    }
+                    $uuid = (Get-WmiObject @cspParams).UUID
+                    if ($uuid -match '^EC2') { 'AWS' } else { 'Platform' }
+                }
+            }
+        }
+    }
+}
+
+
 function Get-mdiAdvancedAuditing {
     param (
         [Parameter(Mandatory = $true)] [string] $ComputerName
@@ -397,6 +506,18 @@ function Get-mdiDomainControllerReadiness {
             $dc.Add('RootCertificates', $certificates.isRootCertificatesOk)
             $details.Add('RootCertificatesDetails', $certificates.details)
 
+            Write-Verbose -Message "Testing MDI sensor for $($dc.FQDN)"
+            $sensorVersion = Get-mdiSensorVersion -ComputerName $dc.FQDN
+            $dc.Add('SensorVersion', $sensorVersion)
+
+            Write-Verbose -Message "Testing capturing component for $($dc.FQDN)"
+            $capComponent = Get-mdiCaptureComponent -ComputerName $dc.FQDN
+            $dc.Add('CapturingComponent', $capComponent)
+
+            Write-Verbose -Message "Getting virtualization platform for $($dc.FQDN)"
+            $machineType = Get-mdiMachineType -ComputerName $dc.FQDN
+            $dc.Add('MachineType', $machineType)
+
 
         } else {
             $dc.Add('Comment', 'Server is not available')
@@ -418,7 +539,7 @@ function Set-MdiReadinessReport {
     )
 
     $jsonReportFile = Join-Path -Path $Path -ChildPath "mdi-$Domain.json"
-    Write-Verbose "Creating detailed json report: $htmlReportFile" -Verbose
+    Write-Verbose "Creating detailed json report: $jsonReportFile" -Verbose
     $ReportData | ConvertTo-Json -Depth 5 | Out-File -FilePath $jsonReportFile -Force
     $jsonReportFilePath = (Resolve-Path -Path $jsonReportFile).Path
 
@@ -431,15 +552,17 @@ tr:nth-child(even) { background-color: #f2f2f2; }
 th { padding: 8px; text-align: left; background-color: #e4e2e0; color: #212121; }
 .red    {background-color: #cd2026; color: #ffffff; }
 .green  {background-color: #4aa564; color: #212121; }
-}
+ul { list-style-type: square; margin: 15px; padding: 5px;}
 </style>
 '@
     $properties = [collections.arraylist] @($ReportData.DomainControllers | Get-Member -MemberType NoteProperty |
             Where-Object { $_.Definition -match '^bool' }).Name
     $properties.Insert(0, 'FQDN')
-    [void] $properties.Add('Comment')
+    $propsToAdd = @('SensorVersion', 'CapturingComponent', 'MachineType', 'Comment')
+    [void] $properties.AddRange($propsToAdd)
+    $regReplacePattern = '<th>(?!FQDN)(?!{0})(\w+)' -f ($propsToAdd -join '|')
     $htmlDCs = ((($ReportData.DomainControllers | Sort-Object FQDN | Select-Object $properties | ConvertTo-Html -Fragment) `
-                -replace '<th>(?!FQDN)(?!Comment)(\w+)', '<th><a href="https://aka.ms/mdi/$1">$1</a>') `
+                -replace $regReplacePattern, '<th><a href="https://aka.ms/mdi/$1">$1</a>') `
             -replace '<td>True', '<td class="green">True') `
         -replace '<td>False', '<td class="red">False' `
         -join [environment]::NewLine
@@ -463,9 +586,16 @@ th { padding: 8px; text-align: left; background-color: #e4e2e0; color: #212121; 
 {2}
 <h4>Domain Controllers readiness</h4>
 {3}
-<br/>Full details file can be found at <a href='{4}'>{4}</a><br/>
-<br/>Created at {5} by <a href='https://aka.ms/mdi/Test-MdiReadiness'>Test-MdiReadiness.ps1</a>
-'@ -f $css, $domain, $htmlDS, $htmlDCs, $jsonReportFilePath, [datetime]::Now
+<h4>Other requirements</h4>
+<ul>
+<li>For virtualized machines, please verify that the memory is allocated to the virtual machine at all times, and that the <i>'Large Send Offload (LSO)'</i> is disabled</li>
+<li>Please verify that the required ports are opened from the sensor servers to the devices on the network. For more details, see <a href='{4}/NNR'>{4}/NNR</a></li>
+<li>Please verify that the <i>'Restrict clients allowed to make remote calls to SAM'</i> policy is configured as required. For more details, see <a href='{4}/SAMR'>{4}/SAMR</a></li>
+</ul>
+<hr>
+<br/>Full details file can be found at <a href='{5}'>{5}</a><br/>
+<br/>Created at {6} by <a href='{4}/Test-MdiReadiness'>Test-MdiReadiness.ps1</a>
+'@ -f $css, $domain, $htmlDS, $htmlDCs, 'https://aka.ms/mdi', $jsonReportFilePath, [datetime]::Now
 
     $htmlReportFile = Join-Path -Path $Path -ChildPath "mdi-$Domain.html"
     Write-Verbose "Creating html report: $htmlReportFile" -Verbose
