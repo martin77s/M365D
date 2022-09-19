@@ -396,6 +396,8 @@ SecurityIdentifier,AccessMask,AuditFlagsValue,InheritedObjectAceType
 S-1-1-0,852331,1,bf967a9c-0de6-11d0-a285-00aa003049e2
 S-1-1-0,852331,1,bf967a86-0de6-11d0-a285-00aa003049e2
 S-1-1-0,852331,1,bf967aba-0de6-11d0-a285-00aa003049e2
+S-1-1-0,852331,1,ce206244-5827-4a86-ba1c-1c0c386c1b64
+S-1-1-0,852331,1,7b8b558a-93a5-4af7-adca-c017e67f1057
 '@ | ConvertFrom-Csv
 
     $ds = [adsi]('LDAP://{0}/ROOTDSE' -f $Domain)
