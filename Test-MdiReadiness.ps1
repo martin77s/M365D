@@ -541,7 +541,7 @@ function Set-MdiReadinessReport {
     )
 
     $jsonReportFile = Join-Path -Path $Path -ChildPath "mdi-$Domain.json"
-    Write-Verbose "Creating detailed json report: $jsonReportFile" -Verbose
+    Write-Verbose "Creating detailed json report: $jsonReportFile"
     $ReportData | ConvertTo-Json -Depth 5 | Out-File -FilePath $jsonReportFile -Force
     $jsonReportFilePath = (Resolve-Path -Path $jsonReportFile).Path
 
@@ -600,11 +600,32 @@ ul { list-style-type: square; margin: 15px; padding: 5px;}
 '@ -f $css, $domain, $htmlDS, $htmlDCs, 'https://aka.ms/mdi', $jsonReportFilePath, [datetime]::Now
 
     $htmlReportFile = Join-Path -Path $Path -ChildPath "mdi-$Domain.html"
-    Write-Verbose "Creating html report: $htmlReportFile" -Verbose
+    Write-Verbose "Creating html report: $htmlReportFile"
     $htmlContent | Out-File -FilePath $htmlReportFile -Force
     (Resolve-Path -Path $htmlReportFile).Path
 }
 
+
+function Test-mdiReadinessResult {
+    param (
+        [Parameter(Mandatory = $true)] [object[]] $ReportData
+    )
+    $properties = @($ReportData.DomainControllers | Get-Member -MemberType NoteProperty |
+            Where-Object { $_.Definition -match '^bool' }).Name
+
+    $dcsOk = (($ReportData.DomainControllers | ForEach-Object {
+                $dc = $_; $properties | ForEach-Object {
+                    $dc | Select-Object -ExpandProperty $_
+                }
+            }) -ne $true).Count -eq 0
+
+    $return = $dcsOk -and
+        $report.DomainAdfsAuditing.isAdfsAuditingOk -and
+            $report.DomainObjectAuditing.isObjectAuditingOk -and
+                $report.DomainExchangeAuditing.isExchangeAuditingOk
+
+    $return
+}
 #endregion
 
 
@@ -621,6 +642,9 @@ if ($PSCmdlet.ShouldProcess($Domain, 'Create MDI related configuration reports')
     }
 
     $htmlReportFile = Set-MdiReadinessReport -Domain $Domain -Path $Path -ReportData $report
+
+    Test-mdiReadinessResult -ReportData $report
+
     if ($OpenHtmlReport) { Invoke-Item -Path $htmlReportFile }
 }
 
