@@ -13,8 +13,8 @@
 Script Name	: Test-MdiReadiness.ps1
 Description	: Verify Microsoft Defender for Identity prerequisites are in place
 Author		: Martin Schvartzman, Microsoft
-Last Update	: 2022/09/18
-Version		: 0.2
+Last Update	: 2022/09/19
+Version		: 0.3
 Keywords	: MDI, Deployment, Configuration, Support, Troubleshooting
 Note		: Running the script on an environment with MDI already deployed will trigger RCE (Remote Code Execution) alerts
 
