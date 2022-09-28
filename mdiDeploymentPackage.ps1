@@ -13,8 +13,8 @@
 Script Name	: mdiDeploymentPackage.ps1
 Description	: Download the MDI sensor installation accessKey and package (only if newer version is available)
 Author		: Martin Schvartzman, Microsoft
-Last Update	: 2022/08/18
-Version		: 0.3
+Last Update	: 2022/09/28
+Version		: 0.4
 Keywords	: MDI, API, Deployment
 
 #>
@@ -43,7 +43,8 @@ function Get-mdiToken {
             'password'     = ($Credential).GetNetworkCredential().Password
             'grant_type'   = 'password'
             'redirect_uri' = 'urn:ietf:wg:oauth:2.0:oob' # PowerShell redirect Uri
-            'client_id'    = '1950a258-227b-4e31-a9cf-717495945fc2' # PowerShell client Id
+            #'client_id'    = '1950a258-227b-4e31-a9cf-717495945fc2' # PowerShell client Id
+            'client_id'    = '29d9ed98-a469-4536-ade2-f981bc1d605e' # Microsoft Authentication Broker
             'resource'     = '7b7531ad-5926-4f2d-8a1d-38495ad33e17' # Azure Advanced Threat Protection 1st party applicationId
         }
         'Method'      = 'Post'
