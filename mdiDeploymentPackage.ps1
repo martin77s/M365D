@@ -11,10 +11,10 @@
  =================================================================================================================================
 
 Script Name	: mdiDeploymentPackage.ps1
-Description	: Download the MDI sensor installation accessKey and package (only if newer version is available)
+Description	: Download the MDI sensor installation accessKey and package (only if newer version is available) and get the current sensors details
 Author		: Martin Schvartzman, Microsoft
-Last Update	: 2022/09/28
-Version		: 0.4
+Last Update	: 2022/10/26
+Version		: 0.5
 Keywords	: MDI, API, Deployment
 
 #>
@@ -80,7 +80,7 @@ function Get-mdiSensorPackage {
         [switch] $Force
     )
 
-    if(-not (Test-Path $path)) {
+    if (-not (Test-Path $path)) {
         New-Item -ItemType Directory -Path $path | Out-Null
     }
 
@@ -103,8 +103,29 @@ function Get-mdiSensorPackage {
     }
     Get-ChildItem -Path $returnPath -Filter *.zip
 }
-#endregion
 
+
+function Get-mdiSensor {
+    param(
+        [Parameter(Mandatory = $true)] [string] $accessToken,
+        [Parameter(Mandatory = $true)] [string] $workspaceName
+    )
+    $uri = 'https://{0}.atp.azure.com/api/sensors' -f $workspaceName
+    $headers = @{
+        'Authorization' = 'Bearer ' + $accessToken
+    }
+    $sensorlist = (Invoke-WebRequest -Uri $uri -UseBasicParsing -Headers  $headers -Method Get).Content
+    $sensorlist | ConvertFrom-Json | Select-Object Id, SensorType, NetbiosName, RunningComputerFqdn,
+    @{N = 'Version'; E = { $_.Software.VersionExternal } }, @{N = 'ServiceStatus'; E = { $_.DisplayServiceStatus } },
+    @{N = 'SoftwareStatus'; E = { $_.Software.Status } }, @{N = 'DeploymentStatus'; E = { $_.Software.DeploymentStatus } },
+    @{N = 'IsDelayedUpdateEnabled'; E = { $_.Software.IsDelayedUpdateEnabled } },
+    @{N = 'DirectoryServicesClientConfiguration'; E = { $_.Configuration.DirectoryServicesClientConfiguration } },
+    @{N = 'NetworkListenerConfiguration'; E = { $_.Configuration.NetworkListenerConfiguration } },
+    @{N = 'SyslogClientConfiguration'; E = { $_.Configuration.SyslogClientConfiguration } },
+    *Time, Description
+}
+
+#endregion
 
 
 # If not supplied, extract the workspace name from the upn suffix
@@ -124,3 +145,8 @@ $accessKey = Get-mdiSensorDeploymentAccessKey -accessToken $accessToken -workspa
 Write-Verbose -Verbose -Message 'Downloading latest sensor installation package'
 $mdiSensorPackage = Get-mdiSensorPackage -accessToken $accessToken -workspaceName $workspaceName -path $Path
 $mdiSensorPackage
+
+
+Write-Verbose -Verbose -Message 'Get the registered sensors'
+$sensors = Get-mdiSensor -accessToken $accessToken -workspaceName $workspaceName
+$sensors
