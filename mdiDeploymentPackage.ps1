@@ -13,8 +13,8 @@
 Script Name	: mdiDeploymentPackage.ps1
 Description	: Download the MDI sensor installation accessKey and package (only if newer version is available) and get the current sensors details
 Author		: Martin Schvartzman, Microsoft
-Last Update	: 2022/10/26
-Version		: 0.5
+Last Update	: 2023/04/10
+Version		: 0.6
 Keywords	: MDI, API, Deployment
 
 #>
@@ -115,7 +115,7 @@ function Get-mdiSensor {
         'Authorization' = 'Bearer ' + $accessToken
     }
     $sensorlist = (Invoke-WebRequest -Uri $uri -UseBasicParsing -Headers  $headers -Method Get).Content
-    $sensorlist | ConvertFrom-Json | Select-Object Id, SensorType, NetbiosName, RunningComputerFqdn,
+    $sensorlist | ConvertFrom-Json | Select-Object @{N = 'SensorId'; E = { $_.Id } }, SensorType, NetbiosName, RunningComputerFqdn,
     @{N = 'Version'; E = { $_.Software.VersionExternal } }, @{N = 'ServiceStatus'; E = { $_.DisplayServiceStatus } },
     @{N = 'SoftwareStatus'; E = { $_.Software.Status } }, @{N = 'DeploymentStatus'; E = { $_.Software.DeploymentStatus } },
     @{N = 'IsDelayedUpdateEnabled'; E = { $_.Software.IsDelayedUpdateEnabled } },
@@ -123,6 +123,65 @@ function Get-mdiSensor {
     @{N = 'NetworkListenerConfiguration'; E = { $_.Configuration.NetworkListenerConfiguration } },
     @{N = 'SyslogClientConfiguration'; E = { $_.Configuration.SyslogClientConfiguration } },
     *Time, Description
+}
+
+
+function Set-mdiSensorDelayedUpdate {
+    [CmdletBinding(DefaultParameterSetName = 'Enable', SupportsShouldProcess = $true)]
+    param(
+        [Parameter(Mandatory = $true)] [string] $accessToken,
+        [Parameter(Mandatory = $true)] [string] $workspaceName,
+        [Parameter(Mandatory = $true)] [string] $SensorId,
+        [Parameter(Mandatory = $false, ParameterSetName = 'Enable')] [switch] $EnableDelayedUpdates,
+        [Parameter(Mandatory = $false, ParameterSetName = 'Disable')] [switch] $DisableDelayedUpdates
+    )
+    [bool]$IsDelayedDeploymentEnabled = switch ($PSCmdlet.ParameterSetName) {
+        'Enable' { $EnableDelayedUpdates }
+        'Disable' { -not $DisableDelayedUpdates }
+    }
+    if ($PSCmdlet.ShouldProcess($SensorId, ('{0} sensor delayed updates' -f $PSCmdlet.ParameterSetName))) {
+        $params = @{
+            'Uri'         = 'https://{0}.atp.azure.com/api/sensors/{1}/configuration/software' -f $workspaceName, $SensorId
+            'Method'      = 'Put'
+            'ContentType' = 'application/json'
+            'Headers'     = @{
+                'Authorization' = 'Bearer ' + $accessToken
+            }
+            'Body'        = @{
+                'SensorId'                   = $SensorId
+                'IsDelayedDeploymentEnabled' = $IsDelayedDeploymentEnabled
+            } | ConvertTo-Json -Compress
+        }
+        Invoke-WebRequest @params | Out-Null
+    }
+}
+
+
+function Get-mdiHealthAlerts {
+    param(
+        [Parameter(Mandatory = $true)] [string] $accessToken,
+        [Parameter(Mandatory = $true)] [string] $workspaceName
+    )
+    $uri = 'https://{0}.atp.azure.com/api/monitoringAlerts' -f $workspaceName
+    $headers = @{
+        'Authorization' = 'Bearer ' + $accessToken
+    }
+
+    $mdiSensors = Get-mdiSensor -accessToken $accessToken -workspaceName $workspaceName
+
+    $monitoringAlerts = (Invoke-WebRequest -Uri $uri -UseBasicParsing -Headers  $headers -Method Get).Content
+    $monitoringAlerts | ConvertFrom-Json | Where-Object { $_.Status -eq 'Open' }  | ForEach-Object {
+        if ($null -ne $_.AccountDomainName) {
+            $DomainName = $_.AccountDomainName
+        } else {
+            $SensorId = @($_.SensorId) + $_.SensorIds
+            $sensors = $mdiSensors | Where-Object { $SensorId -contains $_.SensorId }
+            $SensorFqdn = $sensors.RunningComputerFqdn
+            $DomainName = $sensors.RunningComputerFqdn -replace '^([^.]+).(.*)', '$2'
+        }
+        $_ | Select-Object @{N = 'HealthAlertId'; E = { $_.Id } }, Type, SystemCreationTime, SystemUpdateTime, Severity,
+        @{N = 'DomainName'; E = { $DomainName } } , @{N = 'SensorFqdn'; E = { $SensorFqdn } }
+    }
 }
 
 #endregion
@@ -150,3 +209,14 @@ $mdiSensorPackage
 Write-Verbose -Verbose -Message 'Get the registered sensors'
 $sensors = Get-mdiSensor -accessToken $accessToken -workspaceName $workspaceName
 $sensors
+
+
+Write-Verbose -Verbose -Message 'Enable / Disable sensors delayed updates'
+$sensorId = 'e8a39832-2a34-40f5-a9c6-bd8c40d7ed7b'
+Set-mdiSensorDelayedUpdate -accessToken $accessToken -workspaceName $workspaceName -SensorId $sensorId -EnableDelayedUpdates
+Set-mdiSensorDelayedUpdate -accessToken $accessToken -workspaceName $workspaceName -SensorId $sensorId -DisableDelayedUpdates
+
+
+Write-Verbose -Verbose -Message 'Get the health alerts'
+$healthAlerts = Get-mdiHealthAlerts -accessToken $accessToken -workspaceName $workspaceName
+$healthAlerts
