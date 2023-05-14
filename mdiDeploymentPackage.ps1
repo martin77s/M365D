@@ -13,8 +13,8 @@
 Script Name	: mdiDeploymentPackage.ps1
 Description	: Download the MDI sensor installation accessKey and package (only if newer version is available) and get the current sensors details
 Author		: Martin Schvartzman, Microsoft
-Last Update	: 2023/05/01
-Version		: 0.7
+Last Update	: 2023/05/14
+Version		: 0.8
 Keywords	: MDI, API, Deployment
 
 #>
@@ -197,6 +197,29 @@ function Remove-mdiSyslogConfiguration {
     $result = Invoke-WebRequest -Uri $uri -UseBasicParsing -Headers $headers -Method Delete
     if ($result.StatusCode -ne 200) {
         throw 'Failed to delete the Syslog service configuration'
+    }
+}
+
+
+function Reset-mdiSensorDeploymentAccessKey {
+    param(
+        [Parameter(Mandatory = $true)] [string] $accessToken,
+        [Parameter(Mandatory = $true)] [string] $workspaceName
+    )
+    $params = @{
+        'Uri'         = 'https://{0}.atp.azure.com/api/workspace/sensorDeploymentAccessKey' -f $workspaceName
+        'Method'      = 'Put'
+        'ContentType' = 'application/json'
+        'Headers'     = @{
+            'Authorization' = 'Bearer ' + $accessToken
+        }
+        'Body'        = @{} | ConvertTo-Json -Compress
+    }
+    $result = Invoke-WebRequest @params
+    if ($result.StatusCode -ne 200) {
+        throw 'Failed to regenerate the sensor deployment access key'
+    } else {
+        ($result.Content | ConvertFrom-Json).SensorDeploymentAccessKey
     }
 }
 
